@@ -1,3 +1,6 @@
+This is a fork for me to store my solutions to the [ARENA]([url](https://www.arena.education/)) exercises so I can access them between VMs.
+It won't be used for merging PRs to the original ARENA repo.
+
 # Install Instructions
 
 1) Close the repo
