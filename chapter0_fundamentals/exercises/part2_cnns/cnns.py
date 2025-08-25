@@ -219,3 +219,65 @@ line(
 
 
 # %%
+@dataclass
+class SimpleMLPTrainingArgs:
+    """
+    Defining this class implicitly creates an __init__ method, which sets arguments as below, e.g.
+    self.batch_size=64. Any of these fields can also be overridden when you create an instance, e.g.
+    SimpleMLPTrainingArgs(batch_size=128).
+    """
+
+    batch_size: int = 64
+    epochs: int = 10
+    learning_rate: float = 1e-3
+
+def train(args: SimpleMLPTrainingArgs) -> tuple[list[float], list[float], SimpleMLP]:
+    """
+    Trains the model, using training parameters from the `args` object.
+
+    Returns:
+        The model, and lists of loss & accuracy.
+    """
+    model = SimpleMLP().to(device)
+    mnist_trainset, mnist_testset = get_mnist()
+    mnist_trainloader = DataLoader(mnist_trainset, args.batch_size, shuffle=True)
+    mnist_testloader = DataLoader(mnist_testset, args.batch_size, shuffle=False)
+    optimizer = t.optim.Adam(model.parameters(), lr=args.learning_rate)
+    loss_list: list[float] = []
+    accuracy_list: list[float] = []
+
+    for epoch in range(args.epochs):
+
+        pbar = tqdm(mnist_trainloader)
+        for imgs, labels in pbar:
+            imgs, labels = imgs.to(device), labels.to(device)
+            logits = model(imgs)
+            loss = F.cross_entropy(logits, labels)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+            loss_list.append(loss.item())
+            pbar.set_postfix(epoch=f"{epoch + 1}/{args.epochs}", loss=f"{loss:.3f}")
+
+        num_correct_classifications = 0
+        for imgs, labels in mnist_testloader:
+            imgs, labels = imgs.to(device), labels.to(device)
+            with t.inference_mode():
+                logits: Float[Tensor, "batch output_feats"] = model(imgs)
+            preds = logits.argmax(dim=-1)
+            preds.shape
+            num_correct_classifications += (preds.eq(labels)).sum().item()
+            
+        accuracy = num_correct_classifications / len(mnist_testset)
+        print(f"Epoch {epoch} validation accuracy {accuracy * 100}%")
+        accuracy_list.append(accuracy)
+
+
+    return loss_list, accuracy_list, model
+
+
+
+args = SimpleMLPTrainingArgs()
+loss_list, accuracy_list, model = train(args)
+# %%
