@@ -280,4 +280,312 @@ def train(args: SimpleMLPTrainingArgs) -> tuple[list[float], list[float], Simple
 
 args = SimpleMLPTrainingArgs()
 loss_list, accuracy_list, model = train(args)
+
+#%%
+in_channels=24; out_channels=12; kernel_size=3
+stride=2; padding=1
+
+num_inputs = in_channels * kernel_size ** 2
+kaiming_scale = 1 / np.sqrt(num_inputs)
+weight = (t.rand(out_channels, in_channels, kernel_size, kernel_size) * 2 - 1) * 2
+
+# b = np.random.randint(1, 10)
+# h = np.random.randint(10, 300)
+# w = np.random.randint(10, 300)
+# ci = np.random.randint(1, 20)
+# co = np.random.randint(1, 20)
+# if tuples:
+#     stride = tuple(np.random.randint(1, 5, size=(2,)))
+#     padding = tuple(np.random.randint(0, 5, size=(2,)))
+#     kernel_size = tuple(np.random.randint(1, 10, size=(2,)))
+# else:
+#     stride = np.random.randint(1, 5)
+#     padding = np.random.randint(0, 5)
+#     kernel_size = np.random.randint(1, 10)
+# x = t.randn((b, ci, h, w))
+
+
+
+
+# %%
+
+class Conv2d(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int = 1,
+        padding: int = 0,
+    ):
+        """
+        Same as torch.nn.Conv2d with bias=False.
+
+        Name your weight field `self.weight` for compatibility with the PyTorch version.
+
+        We assume kernel is square, with height = width = `kernel_size`.
+        """
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+
+        num_inputs = in_channels * kernel_size * kernel_size # All inputs used to calcuate outputs
+        kaiming_scale = 1 / np.sqrt(num_inputs)
+        weights_minus1to1 = (t.rand(out_channels, in_channels, kernel_size, kernel_size) * 2) - 1
+        self.weight = t.nn.Parameter(weights_minus1to1 * kaiming_scale)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Apply the functional conv2d, which you can import."""
+        return t.nn.functional.conv2d(x, self.weight, stride=self.stride, padding=self.padding)
+
+    def extra_repr(self) -> str:
+        keys = ["in_channels", "out_channels", "kernel_size", "stride", "padding"]
+        return ", ".join([f"{key}={getattr(self, key)}" for key in keys])
+
+
+tests.test_conv2d_module(Conv2d)
+m = Conv2d(in_channels=24, out_channels=12, kernel_size=3, stride=2, padding=1)
+print(f"Manually verify that this is an informative repr: {m}")
+
+# %%
+class Sequential(nn.Module):
+    _modules: dict[str, nn.Module]
+
+    def __init__(self, *modules: nn.Module):
+        super().__init__()
+        for index, mod in enumerate(modules):
+            self._modules[str(index)] = mod
+
+    def __getitem__(self, index: int) -> nn.Module:
+        index %= len(self._modules)  # deal with negative indices
+        return self._modules[str(index)]
+
+    def __setitem__(self, index: int, module: nn.Module) -> None:
+        index %= len(self._modules)  # deal with negative indices
+        self._modules[str(index)] = module
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Chain each module together, with the output from one feeding into the next one."""
+        for mod in self._modules.values():
+            x = mod(x)
+        return x
+
+
+
+# %%
+class BatchNorm2d(nn.Module):
+    # The type hints below aren't functional, they're just for documentation
+    running_mean: Float[Tensor, "num_features"]
+    running_var: Float[Tensor, "num_features"]
+    num_batches_tracked: Int[Tensor, ""]  # This is how we denote a scalar tensor
+
+    def __init__(self, num_features: int, eps=1e-05, momentum=0.1):
+        """
+        Like nn.BatchNorm2d with track_running_stats=True and affine=True.
+
+        Name the learnable affine parameters `weight` and `bias` in that order.
+        """
+        super().__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.momentum = momentum
+
+        self.weight = nn.Parameter(t.ones(num_features))
+        self.bias = nn.Parameter(t.zeros(num_features))
+
+        self.register_buffer("running_mean", t.zeros(num_features))
+        self.register_buffer("running_var", t.ones(num_features))
+        self.register_buffer("num_batches_tracked", t.tensor(0))
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Normalize each channel.
+
+        Compute the variance using `torch.var(x, unbiased=False)`
+        Hint: you may also find it helpful to use the argument `keepdim`.
+
+        x: shape (batch, channels, height, width)
+        Return: shape (batch, channels, height, width)
+        """
+        if self.training:
+            batch_mean: Float[Tensor, "features"] = x.mean((0, 2, 3))
+            batch_var: Float[Tensor, "features"] = x.var((0, 2, 3), unbiased=False)
+            self.running_mean: Float[Tensor, "features"] = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
+            self.running_var: Float[Tensor, "features"] = (1 - self.momentum) * self.running_var + self.momentum * batch_var
+            mean = batch_mean.reshape(1, self.num_features, 1, 1)
+            var = batch_var.reshape(1, self.num_features, 1, 1)
+            self.num_batches_tracked += 1
+        else:
+            mean = self.running_mean.reshape(1, self.num_features, 1, 1)
+            var = self.running_var.reshape(1, self.num_features, 1, 1)
+
+        scale = self.weight.reshape(1, self.num_features, 1, 1)
+        shift = self.bias.reshape(1, self.num_features, 1, 1)
+        batch_norm = (x - mean) / t.sqrt(var + self.eps)  * scale + shift
+        print(batch_norm.shape)
+        return batch_norm
+
+            
+
+    def extra_repr(self) -> str:
+        var_strings = [f"{key, value}" for key, value in self.__dict__.items()]
+        return ", ".join(var_strings)
+
+
+tests.test_batchnorm2d_module(BatchNorm2d)
+tests.test_batchnorm2d_forward(BatchNorm2d)
+tests.test_batchnorm2d_running_mean(BatchNorm2d)
+# %%
+class AveragePool(nn.Module):
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        x: shape (batch, channels, height, width)
+        Return: shape (batch, channels)
+        """
+        return x.mean([2,3])
+
+
+tests.test_averagepool(AveragePool)
+
+# %%
+class ResidualBlock(nn.Module):
+    def __init__(self, in_feats: int, out_feats: int, first_stride=1):
+        """
+        A single residual block with optional downsampling.
+
+        For compatibility with the pretrained model, declare the left side branch first using a
+        `Sequential`.
+
+        If first_stride is > 1, this means the optional (conv + bn) should be present on the right
+        branch. Declare it second using another `Sequential`.
+        """
+        super().__init__()
+        print(f"{in_feats=}, {out_feats=}, {first_stride=}")
+        self.relu = ReLU()
+        self.left = Sequential(
+            Conv2d(in_feats, out_feats, 3, first_stride, padding=1), 
+            BatchNorm2d(num_features=out_feats), 
+            ReLU(), 
+            Conv2d(out_feats, out_feats, 3, stride=1, padding=1),
+            BatchNorm2d(out_feats)
+        )
+
+        # determines if right branch is identity
+        is_shape_preserving = (first_stride == 1) and (in_feats == out_feats)  
+        if is_shape_preserving:
+            self.right = nn.Identity()
+        else:
+            self.right = Sequential(
+                Conv2d(in_feats, out_feats, kernel_size=1, stride=first_stride, padding=0),
+                BatchNorm2d(out_feats)
+            )
+                 
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Compute the forward pass. If no downsampling block is present, the addition should just add
+        the left branch's output to the input.
+
+        x: shape (batch, in_feats, height, width)
+
+        Return: shape (batch, out_feats, height / stride, width / stride)
+        """
+        conv_output = self.left(x)
+        skip_output = self.right(x)
+        logits = self.left(x) + self.right(x)
+        return self.relu(logits)
+
+
+tests.test_residual_block(ResidualBlock)
+
+# %%
+class BlockGroup(nn.Module):
+    def __init__(self, n_blocks: int, in_feats: int, out_feats: int, first_stride=1):
+        """
+        An n_blocks-long sequence of ResidualBlock where only the first block uses the provided
+        stride.
+        """
+        super().__init__()
+        self.blocks = Sequential(
+            ResidualBlock(in_feats, out_feats, first_stride),
+            *[ResidualBlock(out_feats, out_feats) for _ in range(n_blocks - 1)]
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Compute the forward pass.
+
+        x: shape (batch, in_feats, height, width)
+
+        Return: shape (batch, out_feats, height / first_stride, width / first_stride)
+        """
+        return self.blocks(x)
+
+
+tests.test_block_group(BlockGroup)
+
+# %%
+class ResNet34(nn.Module):
+    def __init__(
+        self,
+        n_blocks_per_group=[3, 4, 6, 3],
+        out_features_per_group=[64, 128, 256, 512],
+        first_strides_per_group=[1, 2, 2, 2],
+        n_classes=1000,
+    ):
+        super().__init__()
+        out_feats0 = 64
+        self.n_blocks_per_group = n_blocks_per_group
+        self.out_features_per_group = out_features_per_group
+        self.first_strides_per_group = first_strides_per_group
+        self.n_classes = n_classes
+
+
+        self.initial_layers = Sequential(
+            Conv2d(in_channels=3, out_channels=out_feats0, kernel_size=7, stride=2, padding=3),
+            BatchNorm2d(num_features=out_feats0),
+            ReLU(),
+            t.nn.MaxPool2d(kernel_size=3, stride=2),
+        )
+
+        self.in_features_per_group = [out_feats0, *self.out_features_per_group[:-1]]
+        blockgroup_args = zip(self.n_blocks_per_group, self.in_features_per_group, self.out_features_per_group, first_strides_per_group)
+        self.residual_layers = Sequential(
+            *[BlockGroup(block_count, in_feats, out_feats, first_stride) for block_count, in_feats, out_feats, first_stride in blockgroup_args]
+        )
+
+        block_groups_output_dim = out_features_per_group[-1]
+        self.out_layers = Sequential(
+            AveragePool(), 
+            Linear(in_features=block_groups_output_dim, out_features=self.n_classes)
+            )
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        x: shape (batch, channels, height, width)
+        Return: shape (batch, n_classes)
+        """
+        resnet = Sequential(self.initial_layers, self.residual_layers, self.out_layers)
+        return resnet(x)
+
+
+my_resnet = ResNet34()
+
+# (1) Test via helper function `print_param_count`
+target_resnet = (
+    models.resnet34()
+)  # without supplying a `weights` argument, we just initialize with random weights
+utils.print_param_count(my_resnet, target_resnet)
+
+# (2) Test via `torchinfo.summary`
+print("My model:", torchinfo.summary(my_resnet, input_size=(1, 3, 64, 64)), sep="\n")
+print(
+    "\nReference model:",
+    torchinfo.summary(target_resnet, input_size=(1, 3, 64, 64), depth=2),
+    sep="\n",
+)
+
 # %%
