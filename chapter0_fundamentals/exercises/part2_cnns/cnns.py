@@ -688,3 +688,37 @@ assert (my_predictions == pretrained_predictions).all()
 t.testing.assert_close(my_probs, pretrained_probs, atol=5e-4, rtol=0)  # tolerance of 0.05%
 print("All predictions match!")
 # %%
+# Debugging
+assert(my_resnet.training == pretrained_resnet.training)
+
+def capture_activations(name, model_activations):
+    def hook(module, input, output):
+        model_activations[name] = output.detach()
+    return hook
+
+my_activations = {}
+ref_activations = {}
+
+my_resnet.initial_layers[0].register_forward_hook(capture_activations("first_conv", my_activations))
+pretrained_resnet.conv1.register_forward_hook(capture_activations("first_conv", ref_activations))
+
+my_resnet_module_names = [name for name, module in my_resnet.named_modules()]
+pretrained_resnet_names = [name for name, module in pretrained_resnet.named_modules()]
+len(my_resnet_module_names
+
+with t.inference_mode():
+    my_resnet(prepared_images[0:1])
+    pretrained_resnet(prepared_images[0:1])
+
+activation_diffs = my_activations["first_conv"] - ref_activations["first_conv"]
+print(f"{activation_diffs.abs().max()=}")
+
+def remove_all_hooks(model):
+    for module in model.modules():
+        module._forward_hooks.clear()
+
+remove_all_hooks(my_resnet)
+remove_all_hooks(pretrained_resnet)
+
+
+# %%
