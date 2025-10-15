@@ -2,6 +2,7 @@
 import os
 import sys
 from pathlib import Path
+MAIN = __name__ == "__main__"
 
 IN_COLAB = "google.colab" in sys.modules
 
