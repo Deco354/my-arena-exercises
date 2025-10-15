@@ -1,6 +1,3 @@
-*.ipynb 
-# I'll be working within python files so can avoid superficial changes when running jupyter notebooks
-
 .venv
 .direnv
 *__pycache__
