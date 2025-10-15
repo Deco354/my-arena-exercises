@@ -933,7 +933,7 @@ We can view the vectors $W^{in}_{[:, i]}$ as the **input directions**, and $W^{o
 
 Terminology note - sometimes we refer to each of these $d_{mlp}$ input-output pairs as **neurons**.
 
-<img src="https://raw.githubusercontent.com/arena-img/ARENA_img/main/img/mlp-neurons-2.png" width="900">
+<img src="https://raw.githubusercontent.com/info-arena/ARENA_img/main/img/mlp-neurons-2.png" width="900">
 
 ---
 
@@ -1299,7 +1299,9 @@ def load_gpt2_test(cls, gpt2_layer, input):
     layer = cls(cfg).to(device)
     layer.load_state_dict(gpt2_layer.state_dict(), strict=False)
     print("Input shape:", input.shape)
-    output = layer(input)
+    orig_input = input.clone()
+    output = layer(orig_input)
+    assert t.allclose(input, orig_input), "Input has been modified, make sure operations are not done in place"
     if isinstance(output, tuple):
         output = output[0]
     print("Output shape:", output.shape)
@@ -1380,6 +1382,7 @@ class LayerNorm(nn.Module):
 if MAIN:
     rand_float_test(LayerNorm, [2, 4, 768])
     load_gpt2_test(LayerNorm, reference_gpt2.ln_final, cache["resid_post", 11])
+    tests.test_layer_norm_epsilon(LayerNorm, cache["resid_post", 11])
 # END HIDE
 
 # ! CELL TYPE: markdown

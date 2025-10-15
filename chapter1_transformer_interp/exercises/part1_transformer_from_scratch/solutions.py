@@ -205,7 +205,11 @@ def load_gpt2_test(cls, gpt2_layer, input):
     layer = cls(cfg).to(device)
     layer.load_state_dict(gpt2_layer.state_dict(), strict=False)
     print("Input shape:", input.shape)
-    output = layer(input)
+    orig_input = input.clone()
+    output = layer(orig_input)
+    assert t.allclose(
+        input, orig_input
+    ), "Input has been modified, make sure operations are not done in place"
     if isinstance(output, tuple):
         output = output[0]
     print("Output shape:", output.shape)
@@ -216,9 +220,9 @@ def load_gpt2_test(cls, gpt2_layer, input):
     print("Reference output shape:", reference_output.shape, "\n")
     comparison = t.isclose(output, reference_output, atol=1e-4, rtol=1e-3)
     print(f"{comparison.sum() / comparison.numel():.2%} of the values are correct\n")
-    assert 1 - (comparison.sum() / comparison.numel()) < 1e-5, (
-        "More than 0.01% of the values are incorrect"
-    )
+    assert (
+        1 - (comparison.sum() / comparison.numel()) < 1e-5
+    ), "More than 0.01% of the values are incorrect"
 
 
 # %%
@@ -246,6 +250,7 @@ class LayerNorm(nn.Module):
 if MAIN:
     rand_float_test(LayerNorm, [2, 4, 768])
     load_gpt2_test(LayerNorm, reference_gpt2.ln_final, cache["resid_post", 11])
+    tests.test_layer_norm_epsilon(LayerNorm, cache["resid_post", 11])
 
 # %%
 
@@ -816,9 +821,9 @@ class TransformerTrainingArgsLogText(TransformerTrainingArgs):
     table_log_freq: int = 200
 
     def __post_init__(self):
-        assert self.table_log_freq >= self.text_sample_freq, (
-            "You should log the table less frequently than you add text to it."
-        )
+        assert (
+            self.table_log_freq >= self.text_sample_freq
+        ), "You should log the table less frequently than you add text to it."
 
 
 def train_log_text(self: TransformerTrainer, sampling_fn: Callable, prompt_list: list[str]):
@@ -1090,9 +1095,9 @@ if MAIN:
         print(
             f"Word: {word!r:<9}. Expected freq {expected_freq:.4f}, observed freq {observed_freq:.4f}"
         )
-        assert abs(observed_freq - expected_freq) < 0.01, (
-            "Try increasing N if this fails by a small amount."
-        )
+        assert (
+            abs(observed_freq - expected_freq) < 0.01
+        ), "Try increasing N if this fails by a small amount."
 
     print("Tests passed!")
 
@@ -1119,12 +1124,12 @@ if MAIN:
     logits = t.ones(tokenizer.vocab_size)
     penalized_logits = TransformerSampler.apply_frequency_penalty(input_ids.squeeze(), logits, 2.0)
 
-    assert penalized_logits[5156].item() == -11, (
-        "Expected 6 occurrences of ' baby' with leading space, 1-2*6=-11"
-    )
-    assert penalized_logits[14801].item() == -5, (
-        "Expected 3 occurrences of ' Baby' with leading space, 1-2*3=-5"
-    )
+    assert (
+        penalized_logits[5156].item() == -11
+    ), "Expected 6 occurrences of ' baby' with leading space, 1-2*6=-11"
+    assert (
+        penalized_logits[14801].item() == -5
+    ), "Expected 3 occurrences of ' Baby' with leading space, 1-2*3=-5"
 
     print("Tests passed!")
 
@@ -1221,9 +1226,9 @@ if MAIN:
         print(
             f"Word: {word!r:<9}. Expected freq {expected_freq:.4f}, observed freq {observed_freq:.4f}"
         )
-        assert abs(observed_freq - expected_freq) < 0.01, (
-            "Try increasing N if this fails by a small amount."
-        )
+        assert (
+            abs(observed_freq - expected_freq) < 0.01
+        ), "Try increasing N if this fails by a small amount."
 
 # %%
 
