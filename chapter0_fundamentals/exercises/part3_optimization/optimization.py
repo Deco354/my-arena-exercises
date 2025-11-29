@@ -482,9 +482,28 @@ class ResNetFinetuner:
         self.logged_variables["accuracy"].append(accuracy)
         return accuracy
 
+    def save_checkpoint(self, filepath: str = "resnet_finetuned.pt"):
+        """Save model checkpoint."""
+        t.save({
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'logged_variables': self.logged_variables,
+            'examples_seen': self.examples_seen,
+        }, filepath)
+        print(f"Checkpoint saved to {filepath}")
+    
+    def load_checkpoint(self, filepath: str = "resnet_finetuned.pt"):
+        """Load model checkpoint."""
+        checkpoint = t.load(filepath, map_location=device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.logged_variables = checkpoint['logged_variables']
+        self.examples_seen = checkpoint['examples_seen']
+        print(f"Checkpoint loaded from {filepath}")
+
     def train(self) -> dict[str, list[float]]:
         self.pre_training_setup()
-
+        
         accuracy = self.evaluate()
 
         for epoch in range(self.args.epochs):
@@ -505,7 +524,18 @@ class ResNetFinetuner:
 # %%
 args = ResNetFinetuningArgs()
 trainer = ResNetFinetuner(args)
-logged_variables = trainer.train()
+
+checkpoint_path = "resnet_finetuned.pt"
+
+if os.path.exists(checkpoint_path):
+    print(f"Loading existing checkpoint from {checkpoint_path}...")
+    trainer.pre_training_setup()
+    trainer.load_checkpoint(checkpoint_path)
+    logged_variables = trainer.logged_variables
+else:
+    print("No checkpoint found. Training from scratch...")
+    logged_variables = trainer.train()
+    trainer.save_checkpoint(checkpoint_path)
 
 line(
     y=[logged_variables["loss"][: 391 * 3 + 1], logged_variables["accuracy"][:4]],
@@ -586,13 +616,23 @@ class WandbResNetFinetuner(ResNetFinetuner):
     def train(self) -> None:
         """Equivalent to ResNetFinetuner.train, but with wandb integration."""
         self.pre_training_setup()
-        logged_variables = super().train()
+        super().train()
         wandb.finish()
 
 
 args = WandbResNetFinetuningArgs()
 trainer = WandbResNetFinetuner(args)
-trainer.train()
+
+checkpoint_path = "resnet_finetuned_wandb.pt"
+
+if os.path.exists(checkpoint_path):
+    print(f"Loading existing checkpoint from {checkpoint_path}...")
+    trainer.pre_training_setup()
+    trainer.load_checkpoint(checkpoint_path)
+else:
+    print("No checkpoint found. Training with wandb...")
+    trainer.train()
+    trainer.save_checkpoint(checkpoint_path)
 # %%
 # YOUR CODE HERE - fill `sweep_config` so it has the requested behaviour
 sweep_config = dict(
@@ -605,6 +645,7 @@ sweep_config = dict(
         weight_decay = dict(min = 1e-4, max = 1e-2, distribution = "log_uniform_values")
     )
 )
+print("Hello")
 
 
 def update_args(
