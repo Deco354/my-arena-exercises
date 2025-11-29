@@ -713,6 +713,11 @@ if MAIN:
     )
 
 # %%
+assert t.cuda.is_available()
+assert t.cuda.device_count() > 1
+print(f"GPU Count = {t.cuda.device_count()}")
+
+# %%
 def broadcast(tensor: Tensor, rank: int, world_size: int, src: int = 0):
     """
     Broadcast averaged gradients from rank 0 to all other ranks.
