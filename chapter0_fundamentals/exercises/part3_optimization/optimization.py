@@ -657,10 +657,11 @@ def train():
     trainer = WandbResNetFinetuner(args)
     trainer.train()
 
-
-sweep_id = wandb.sweep(sweep=sweep_config, project="day3-resnet-sweep")
-wandb.agent(sweep_id=sweep_id, function=train, count=3)
-wandb.finish()
+RUN_SWEEP = False
+if RUN_SWEEP:
+    sweep_id = wandb.sweep(sweep=sweep_config, project="day3-resnet-sweep")
+    wandb.agent(sweep_id=sweep_id, function=train, count=3)
+    wandb.finish()
 
 # %%
 WORLD_SIZE = t.cuda.device_count()
