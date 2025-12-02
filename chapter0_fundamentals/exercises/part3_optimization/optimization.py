@@ -1,52 +1,4 @@
 # %%
-import os
-import sys
-from pathlib import Path
-MAIN = __name__ == "__main__"
-
-IN_COLAB = "google.colab" in sys.modules
-
-chapter = "chapter0_fundamentals"
-repo = "ARENA_3.0"
-branch = "main"
-
-# Install dependencies
-try:
-    import jaxtyping
-except:
-    %pip install einops jaxtyping torchinfo wandb
-
-# Get root directory, handling 3 different cases: (1) Colab, (2) notebook not in ARENA repo, (3) notebook in ARENA repo
-root = (
-    "/content"
-    if IN_COLAB
-    else "/root"
-    if repo not in os.getcwd()
-    else str(next(p for p in Path.cwd().parents if p.name == repo))
-)
-
-if Path(root).exists() and not Path(f"{root}/{chapter}").exists():
-    if not IN_COLAB:
-        !sudo apt-get install unzip
-        %pip install jupyter ipython --upgrade
-
-    if not os.path.exists(f"{root}/{chapter}"):
-        !wget -P {root} https://github.com/callummcdougall/ARENA_3.0/archive/refs/heads/{branch}.zip
-        !unzip {root}/{branch}.zip '{repo}-{branch}/{chapter}/exercises/*' -d {root}
-        !mv {root}/{repo}-{branch}/{chapter} {root}/{chapter}
-        !rm {root}/{branch}.zip
-        !rmdir {root}/{repo}-{branch}
-
-
-assert Path(f"{root}/{chapter}/exercises").exists(), (
-    "Unexpected error: please manually clone ARENA repo into `root`"
-)
-
-if f"{root}/{chapter}/exercises" not in sys.path:
-    sys.path.append(f"{root}/{chapter}/exercises")
-
-os.chdir(f"{root}/{chapter}/exercises")
-
 import importlib
 import os
 import sys
@@ -78,6 +30,7 @@ section_dir = exercises_dir / section
 if str(exercises_dir) not in sys.path:
     sys.path.append(str(exercises_dir))
 
+MAIN = __name__ == "__main__"
 
 import part3_optimization.tests as tests
 from part2_cnns.solutions import Linear, ResNet34, get_resnet_for_feature_extraction
