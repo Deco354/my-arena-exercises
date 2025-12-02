@@ -337,6 +337,30 @@ class AdamW:
             f"AdamW(lr={self.lr}, beta1={self.beta1}, beta2={self.beta2}, eps={self.eps}, "
             f"weight_decay={self.lmda})"
         )
+    
+    def state_dict(self) -> dict:
+        """Returns the state of the optimizer as a dictionary."""
+        return {
+            'lr': self.lr,
+            'beta1': self.beta1,
+            'beta2': self.beta2,
+            'eps': self.eps,
+            'lmda': self.lmda,
+            't': self.t,
+            'm': [m.clone() for m in self.m],
+            'v': [v.clone() for v in self.v],
+        }
+    
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Loads the optimizer state."""
+        self.lr = state_dict['lr']
+        self.beta1 = state_dict['beta1']
+        self.beta2 = state_dict['beta2']
+        self.eps = state_dict['eps']
+        self.lmda = state_dict['lmda']
+        self.t = state_dict['t']
+        self.m = [m.clone() for m in state_dict['m']]
+        self.v = [v.clone() for v in state_dict['v']]
 
 # %%
 def get_cifar() -> tuple[datasets.CIFAR10, datasets.CIFAR10]:
