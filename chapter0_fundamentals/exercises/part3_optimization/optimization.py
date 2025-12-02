@@ -633,13 +633,11 @@ if MAIN:
     print(f"GPU Count = {t.cuda.device_count()}")
 
 # %%
-if MAIN:
-    WORLD_SIZE = t.cuda.device_count()
+WORLD_SIZE = t.cuda.device_count()
 
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
+os.environ["MASTER_ADDR"] = "localhost"
+os.environ["MASTER_PORT"] = "12356"
 
-# %%
 def send_receive_nccl(rank, world_size):
     dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
 
