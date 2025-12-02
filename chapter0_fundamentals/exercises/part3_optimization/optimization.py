@@ -662,6 +662,10 @@ if RUN_SWEEP:
     sweep_id = wandb.sweep(sweep=sweep_config, project="day3-resnet-sweep")
     wandb.agent(sweep_id=sweep_id, function=train, count=3)
     wandb.finish()
+# %%
+assert t.cuda.is_available()
+assert t.cuda.device_count() > 1
+print(f"GPU Count = {t.cuda.device_count()}")
 
 # %%
 WORLD_SIZE = t.cuda.device_count()
@@ -730,11 +734,6 @@ if MAIN:
         nprocs=world_size,
         join=True,
     )
-
-# %%
-assert t.cuda.is_available()
-assert t.cuda.device_count() > 1
-print(f"GPU Count = {t.cuda.device_count()}")
 
 # %%
 def broadcast(tensor: Tensor, rank: int, world_size: int, src: int = 0):
