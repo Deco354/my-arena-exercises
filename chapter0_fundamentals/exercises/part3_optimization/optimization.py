@@ -49,7 +49,8 @@ def pathological_curve_loss(x: Tensor, y: Tensor):
     return x_loss + y_loss
 
 
-plot_fn(pathological_curve_loss, min_points=[(0, "y_min")])
+if MAIN:
+    plot_fn(pathological_curve_loss, min_points=[(0, "y_min")])
 # %%
 def opt_fn_with_sgd(
     fn: Callable, xy: Float[Tensor, "2"], lr=0.001, momentum=0.98, n_iters: int = 100
@@ -78,23 +79,24 @@ def opt_fn_with_sgd(
     return xy_list.detach()
 
 # %%
-points = []
+if MAIN:
+    points = []
 
-optimizer_list = [
-    (optim.SGD, {"lr": 0.1, "momentum": 0.0}),
-    (optim.SGD, {"lr": 0.02, "momentum": 0.99}),
-]
+    optimizer_list = [
+        (optim.SGD, {"lr": 0.1, "momentum": 0.0}),
+        (optim.SGD, {"lr": 0.02, "momentum": 0.99}),
+    ]
 
-for optimizer_class, params in optimizer_list:
-    xy = t.tensor([2.5, 2.5], requires_grad=True)
-    xys = opt_fn_with_sgd(
-        pathological_curve_loss, xy=xy, lr=params["lr"], momentum=params["momentum"]
-    )
-    lr=params["lr"]; momentum=params["momentum"]; n_iters: int = 100; fn = pathological_curve_loss
-    points.append((xys, optimizer_class, params))
-    print(f"{params=}, last point={xys[-1]}")
+    for optimizer_class, params in optimizer_list:
+        xy = t.tensor([2.5, 2.5], requires_grad=True)
+        xys = opt_fn_with_sgd(
+            pathological_curve_loss, xy=xy, lr=params["lr"], momentum=params["momentum"]
+        )
+        lr=params["lr"]; momentum=params["momentum"]; n_iters: int = 100; fn = pathological_curve_loss
+        points.append((xys, optimizer_class, params))
+        print(f"{params=}, last point={xys[-1]}")
 
-plot_fn_with_points(pathological_curve_loss, points=points, min_points=[(0, "y_min")])
+    plot_fn_with_points(pathological_curve_loss, points=points, min_points=[(0, "y_min")])
 # %%
 
 class SGD:
@@ -143,7 +145,8 @@ class SGD:
         return f"SGD(lr={self.lr}, momentum={self.mu}, weight_decay={self.lmda})"
 
 
-tests.test_sgd(SGD)
+if MAIN:
+    tests.test_sgd(SGD)
 # %%
 class Adam:
     def __init__(
@@ -192,7 +195,8 @@ class Adam:
         )
 
 
-tests.test_adam(Adam)
+if MAIN:
+    tests.test_adam(Adam)
 # %%
 def opt_fn(
     fn: Callable,
@@ -223,26 +227,27 @@ def opt_fn(
     return t.stack(xy_list)
 
 
-points = []
+if MAIN:
+    points = []
 
-optimizer_list = [
-    (SGD, {"lr": 0.03, "momentum": 0.99}),
-    # (RMSprop, {"lr": 0.02, "alpha": 0.99, "momentum": 0.8}),
-    (Adam, {"lr": 0.2, "betas": (0.99, 0.99), "weight_decay": 0.005}),
-    # (AdamW, {"lr": 0.2, "betas": (0.99, 0.99), "weight_decay": 0.005}),
-]
+    optimizer_list = [
+        (SGD, {"lr": 0.03, "momentum": 0.99}),
+        # (RMSprop, {"lr": 0.02, "alpha": 0.99, "momentum": 0.8}),
+        (Adam, {"lr": 0.2, "betas": (0.99, 0.99), "weight_decay": 0.005}),
+        # (AdamW, {"lr": 0.2, "betas": (0.99, 0.99), "weight_decay": 0.005}),
+    ]
 
-for optimizer_class, params in optimizer_list:
-    xy = t.tensor([2.5, 2.5], requires_grad=True)
-    xys = opt_fn(
-        pathological_curve_loss,
-        xy=xy,
-        optimizer_class=optimizer_class,
-        optimizer_hyperparams=params,
-    )
-    points.append((xys, optimizer_class, params))
+    for optimizer_class, params in optimizer_list:
+        xy = t.tensor([2.5, 2.5], requires_grad=True)
+        xys = opt_fn(
+            pathological_curve_loss,
+            xy=xy,
+            optimizer_class=optimizer_class,
+            optimizer_hyperparams=params,
+        )
+        points.append((xys, optimizer_class, params))
 
-plot_fn_with_points(pathological_curve_loss, min_points=[(0, "y_min")], points=points)
+    plot_fn_with_points(pathological_curve_loss, min_points=[(0, "y_min")], points=points)
     
 # %%
 class AdamW:
@@ -340,16 +345,17 @@ IMAGENET_TRANSFORM = transforms.Compose(
 )
 
 
-cifar_trainset, cifar_testset = get_cifar()
-imshow(
-    cifar_trainset.data[:15],
-    facet_col=0,
-    facet_col_wrap=5,
-    facet_labels=[cifar_trainset.classes[i] for i in cifar_trainset.targets[:15]],
-    title="CIFAR-10 images",
-    height=600,
-    width=1000,
-)
+if MAIN:
+    cifar_trainset, cifar_testset = get_cifar()
+    imshow(
+        cifar_trainset.data[:15],
+        facet_col=0,
+        facet_col_wrap=5,
+        facet_labels=[cifar_trainset.classes[i] for i in cifar_trainset.targets[:15]],
+        title="CIFAR-10 images",
+        height=600,
+        width=1000,
+    )
 # %%
 
 @dataclass
@@ -452,30 +458,31 @@ class ResNetFinetuner:
         return self.logged_variables
     
 # %%
-args = ResNetFinetuningArgs()
-trainer = ResNetFinetuner(args)
+if MAIN:
+    args = ResNetFinetuningArgs()
+    trainer = ResNetFinetuner(args)
 
-checkpoint_path = "resnet_finetuned.pt"
+    checkpoint_path = "resnet_finetuned.pt"
 
-if os.path.exists(checkpoint_path):
-    print(f"Loading existing checkpoint from {checkpoint_path}...")
-    trainer.pre_training_setup()
-    trainer.load_checkpoint(checkpoint_path)
-    logged_variables = trainer.logged_variables
-else:
-    print("No checkpoint found. Training from scratch...")
-    logged_variables = trainer.train()
-    trainer.save_checkpoint(checkpoint_path)
+    if os.path.exists(checkpoint_path):
+        print(f"Loading existing checkpoint from {checkpoint_path}...")
+        trainer.pre_training_setup()
+        trainer.load_checkpoint(checkpoint_path)
+        logged_variables = trainer.logged_variables
+    else:
+        print("No checkpoint found. Training from scratch...")
+        logged_variables = trainer.train()
+        trainer.save_checkpoint(checkpoint_path)
 
-line(
-    y=[logged_variables["loss"][: 391 * 3 + 1], logged_variables["accuracy"][:4]],
-    x_max=len(logged_variables["loss"][: 391 * 3 + 1] * args.batch_size),
-    yaxis2_range=[0, 1],
-    use_secondary_yaxis=True,
-    labels={"x": "Examples seen", "y1": "Cross entropy loss", "y2": "Test Accuracy"},
-    title="Feature extraction with ResNet34",
-    width=800,
-)
+    line(
+        y=[logged_variables["loss"][: 391 * 3 + 1], logged_variables["accuracy"][:4]],
+        x_max=len(logged_variables["loss"][: 391 * 3 + 1] * args.batch_size),
+        yaxis2_range=[0, 1],
+        use_secondary_yaxis=True,
+        labels={"x": "Examples seen", "y1": "Cross entropy loss", "y2": "Test Accuracy"},
+        title="Feature extraction with ResNet34",
+        width=800,
+    )
 
 # %%
 def test_resnet_on_random_input(model: ResNet34, n_inputs: int = 3, seed: int | None = 42):
@@ -504,7 +511,8 @@ def test_resnet_on_random_input(model: ResNet34, n_inputs: int = 3, seed: int | 
         )
 
 
-test_resnet_on_random_input(trainer.model)
+if MAIN:
+    test_resnet_on_random_input(trainer.model)
 # %%
 
 @dataclass
@@ -550,21 +558,23 @@ class WandbResNetFinetuner(ResNetFinetuner):
         wandb.finish()
 
 
-args = WandbResNetFinetuningArgs()
-trainer = WandbResNetFinetuner(args)
+if MAIN:
+    args = WandbResNetFinetuningArgs()
+    trainer = WandbResNetFinetuner(args)
 
-checkpoint_path = "resnet_finetuned_wandb.pt"
+    checkpoint_path = "resnet_finetuned_wandb.pt"
 
-if os.path.exists(checkpoint_path):
-    print(f"Loading existing checkpoint from {checkpoint_path}...")
-    trainer.pre_training_setup()
-    trainer.load_checkpoint(checkpoint_path)
-else:
-    print("No checkpoint found. Training with wandb...")
-    trainer.train()
-    trainer.save_checkpoint(checkpoint_path)
+    if os.path.exists(checkpoint_path):
+        print(f"Loading existing checkpoint from {checkpoint_path}...")
+        trainer.pre_training_setup()
+        trainer.load_checkpoint(checkpoint_path)
+    else:
+        print("No checkpoint found. Training with wandb...")
+        trainer.train()
+        trainer.save_checkpoint(checkpoint_path)
+
+
 # %%
-# YOUR CODE HERE - fill `sweep_config` so it has the requested behaviour
 sweep_config = dict(
     method = "random",
     metric = dict(name = "accuracy", goal = "maximize"),
@@ -575,7 +585,6 @@ sweep_config = dict(
         weight_decay = dict(min = 1e-4, max = 1e-2, distribution = "log_uniform_values")
     )
 )
-print("Hello")
 
 
 def update_args(
@@ -593,9 +602,9 @@ def update_args(
     return args
 
 
-
-tests.test_sweep_config(sweep_config)
-tests.test_update_args(update_args, sweep_config)
+if MAIN:
+    tests.test_sweep_config(sweep_config)
+    tests.test_update_args(update_args, sweep_config)
 # %%
 
 def train():
@@ -610,51 +619,25 @@ def train():
     trainer = WandbResNetFinetuner(args)
     trainer.train()
 
-RUN_SWEEP = False
-if RUN_SWEEP:
-    sweep_id = wandb.sweep(sweep=sweep_config, project="day3-resnet-sweep")
-    wandb.agent(sweep_id=sweep_id, function=train, count=3)
-    wandb.finish()
+if MAIN:
+    RUN_SWEEP = False
+    if RUN_SWEEP:
+        sweep_id = wandb.sweep(sweep=sweep_config, project="day3-resnet-sweep")
+        wandb.agent(sweep_id=sweep_id, function=train, count=3)
+        wandb.finish()
 # %%
-assert t.cuda.is_available()
-assert t.cuda.device_count() > 1
-print(f"GPU Count = {t.cuda.device_count()}")
-
-# %%
-WORLD_SIZE = t.cuda.device_count()
-
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "12345"
-
-
-def send_receive(rank, world_size):
-    dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
-
-    if rank == 0:
-        # Send tensor to rank 1
-        sending_tensor = t.zeros(1)
-        print(f"{rank=}, sending {sending_tensor=}")
-        dist.send(tensor=sending_tensor, dst=1)
-    elif rank == 1:
-        # Receive tensor from rank 0
-        received_tensor = t.ones(1)
-        print(f"{rank=}, creating {received_tensor=}")
-        dist.recv(
-            received_tensor, src=0
-        )  # this line overwrites the tensor's data with our `sending_tensor`
-        print(f"{rank=}, received {received_tensor=}")
-
-    dist.destroy_process_group()
-
 
 if MAIN:
-    world_size = 2  # simulate 2 processes
-    mp.spawn(
-        send_receive,
-        args=(world_size,),
-        nprocs=world_size,
-        join=True,
-    )
+    assert t.cuda.is_available()
+    assert t.cuda.device_count() > 1
+    print(f"GPU Count = {t.cuda.device_count()}")
+
+# %%
+if MAIN:
+    WORLD_SIZE = t.cuda.device_count()
+
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
 
 # %%
 def send_receive_nccl(rank, world_size):
@@ -693,7 +676,7 @@ def broadcast(tensor: Tensor, rank: int, world_size: int, src: int = 0):
     """
     Broadcast averaged gradients from rank 0 to all other ranks.
     """
-    raise NotImplementedError()
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
 
 if MAIN:
