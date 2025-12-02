@@ -290,53 +290,6 @@ for optimizer_class, params in optimizer_list:
     points.append((xys, optimizer_class, params))
 
 plot_fn_with_points(pathological_curve_loss, min_points=[(0, "y_min")], points=points)
-
-# %%
-class AdamW:
-    def __init__(
-        self,
-        params: Iterable[t.nn.parameter.Parameter],
-        lr: float = 0.001,
-        betas: tuple[float, float] = (0.9, 0.999),
-        eps: float = 1e-08,
-        weight_decay: float = 0.0,
-    ):
-        """Implements Adam.
-
-        Like the PyTorch version, but assumes amsgrad=False and maximize=False
-            https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html
-        """
-        self.params = list(params)
-        self.lr = lr
-        self.beta1, self.beta2 = betas
-        self.eps = eps
-        self.lmda = weight_decay
-        self.t = 1
-
-        self.m = [t.zeros_like(p) for p in self.params]
-        self.v = [t.zeros_like(p) for p in self.params]
-
-    def zero_grad(self) -> None:
-        for p in self.params:
-            p.grad = None
-
-    @t.inference_mode()
-    def step(self) -> None:
-        for theta, m, v in zip(self.params, self.m, self.v):
-            g = theta.grad
-            theta *= 1 - self.lr * self.lmda
-            m.copy_(self.beta1 * m + (1 - self.beta1) * g)
-            v.copy_(self.beta2 * v + (1 - self.beta2) * g.pow(2))
-            m_hat = m / (1 - self.beta1**self.t)
-            v_hat = v / (1 - self.beta2**self.t)
-            theta -= self.lr * m_hat / (v_hat.sqrt() + self.eps)
-        self.t += 1
-
-    def __repr__(self) -> str:
-        return (
-            f"AdamW(lr={self.lr}, beta1={self.beta1}, beta2={self.beta2}, eps={self.eps}, "
-            f"weight_decay={self.lmda})"
-        )
     
 # %%
 class AdamW:
@@ -384,6 +337,30 @@ class AdamW:
             f"AdamW(lr={self.lr}, beta1={self.beta1}, beta2={self.beta2}, eps={self.eps}, "
             f"weight_decay={self.lmda})"
         )
+    
+    def state_dict(self) -> dict:
+        """Returns the state of the optimizer as a dictionary."""
+        return {
+            'lr': self.lr,
+            'beta1': self.beta1,
+            'beta2': self.beta2,
+            'eps': self.eps,
+            'lmda': self.lmda,
+            't': self.t,
+            'm': [m.clone() for m in self.m],
+            'v': [v.clone() for v in self.v],
+        }
+    
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Loads the optimizer state."""
+        self.lr = state_dict['lr']
+        self.beta1 = state_dict['beta1']
+        self.beta2 = state_dict['beta2']
+        self.eps = state_dict['eps']
+        self.lmda = state_dict['lmda']
+        self.t = state_dict['t']
+        self.m = [m.clone() for m in state_dict['m']]
+        self.v = [v.clone() for v in state_dict['v']]
 
 # %%
 def get_cifar() -> tuple[datasets.CIFAR10, datasets.CIFAR10]:
@@ -482,9 +459,28 @@ class ResNetFinetuner:
         self.logged_variables["accuracy"].append(accuracy)
         return accuracy
 
+    def save_checkpoint(self, filepath: str = "resnet_finetuned.pt"):
+        """Save model checkpoint."""
+        t.save({
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'logged_variables': self.logged_variables,
+            'examples_seen': self.examples_seen,
+        }, filepath)
+        print(f"Checkpoint saved to {filepath}")
+    
+    def load_checkpoint(self, filepath: str = "resnet_finetuned.pt"):
+        """Load model checkpoint."""
+        checkpoint = t.load(filepath, map_location=device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.logged_variables = checkpoint['logged_variables']
+        self.examples_seen = checkpoint['examples_seen']
+        print(f"Checkpoint loaded from {filepath}")
+
     def train(self) -> dict[str, list[float]]:
         self.pre_training_setup()
-
+        
         accuracy = self.evaluate()
 
         for epoch in range(self.args.epochs):
@@ -505,7 +501,18 @@ class ResNetFinetuner:
 # %%
 args = ResNetFinetuningArgs()
 trainer = ResNetFinetuner(args)
-logged_variables = trainer.train()
+
+checkpoint_path = "resnet_finetuned.pt"
+
+if os.path.exists(checkpoint_path):
+    print(f"Loading existing checkpoint from {checkpoint_path}...")
+    trainer.pre_training_setup()
+    trainer.load_checkpoint(checkpoint_path)
+    logged_variables = trainer.logged_variables
+else:
+    print("No checkpoint found. Training from scratch...")
+    logged_variables = trainer.train()
+    trainer.save_checkpoint(checkpoint_path)
 
 line(
     y=[logged_variables["loss"][: 391 * 3 + 1], logged_variables["accuracy"][:4]],
@@ -586,13 +593,23 @@ class WandbResNetFinetuner(ResNetFinetuner):
     def train(self) -> None:
         """Equivalent to ResNetFinetuner.train, but with wandb integration."""
         self.pre_training_setup()
-        logged_variables = super().train()
+        super().train()
         wandb.finish()
 
 
 args = WandbResNetFinetuningArgs()
 trainer = WandbResNetFinetuner(args)
-trainer.train()
+
+checkpoint_path = "resnet_finetuned_wandb.pt"
+
+if os.path.exists(checkpoint_path):
+    print(f"Loading existing checkpoint from {checkpoint_path}...")
+    trainer.pre_training_setup()
+    trainer.load_checkpoint(checkpoint_path)
+else:
+    print("No checkpoint found. Training with wandb...")
+    trainer.train()
+    trainer.save_checkpoint(checkpoint_path)
 # %%
 # YOUR CODE HERE - fill `sweep_config` so it has the requested behaviour
 sweep_config = dict(
@@ -605,6 +622,7 @@ sweep_config = dict(
         weight_decay = dict(min = 1e-4, max = 1e-2, distribution = "log_uniform_values")
     )
 )
+print("Hello")
 
 
 def update_args(
@@ -639,10 +657,11 @@ def train():
     trainer = WandbResNetFinetuner(args)
     trainer.train()
 
-
-sweep_id = wandb.sweep(sweep=sweep_config, project="day3-resnet-sweep")
-wandb.agent(sweep_id=sweep_id, function=train, count=3)
-wandb.finish()
+RUN_SWEEP = False
+if RUN_SWEEP:
+    sweep_id = wandb.sweep(sweep=sweep_config, project="day3-resnet-sweep")
+    wandb.agent(sweep_id=sweep_id, function=train, count=3)
+    wandb.finish()
 
 # %%
 WORLD_SIZE = t.cuda.device_count()
