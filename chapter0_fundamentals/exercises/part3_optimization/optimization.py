@@ -631,7 +631,6 @@ if MAIN:
     assert t.cuda.is_available()
     assert t.cuda.device_count() > 1
     print(f"GPU Count = {t.cuda.device_count()}")
-
 # %%
 WORLD_SIZE = t.cuda.device_count()
 
@@ -644,7 +643,7 @@ def send_receive_nccl(rank, world_size):
     device = t.device(f"cuda:{rank}")
 
     if rank == 0:
-        # Create a tensor, send it to rank 1
+        # Create a tensor, send it to rank 1. 
         sending_tensor = t.tensor([rank], device=device)
         print(f"{rank=}, {device=}, sending {sending_tensor=}")
         dist.send(sending_tensor, dst=1)  # Send tensor to CPU before sending
@@ -674,8 +673,39 @@ def broadcast(tensor: Tensor, rank: int, world_size: int, src: int = 0):
     """
     Broadcast averaged gradients from rank 0 to all other ranks.
     """
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
+    if rank == src:
+        # Source Rank sends its tensor to all other ranks
+        for other_rank in range(world_size):
+            if other_rank == src:
+                continue
+            dist.send(tensor, dst=other_rank)
+    else:
+        # Creates a clean (no gradients) contiguous buffer
+        recv_buffer = t.zeros_like(tensor)
+        # Recieves the src tensor in to the new buffer
+        dist.recv(recv_buffer, src)
+        #Copies the buffers values to our local tensor
+        tensor.copy_(recv_buffer)
 
 if MAIN:
     tests.test_broadcast(broadcast, WORLD_SIZE)
+# %%
+
+def reduce(tensor, rank, world_size, dst=0, op: Literal["sum", "mean"] = "sum"):
+    """
+    Reduces gradients to rank `dst`, so this process contains the sum or mean of all tensors across
+    processes.
+    """
+    raise NotImplementedError()
+
+
+def all_reduce(tensor, rank, world_size, op: Literal["sum", "mean"] = "sum"):
+    """
+    Allreduce the tensor across all ranks, using 0 as the initial gathering rank.
+    """
+    raise NotImplementedError()
+
+
+if MAIN:
+    tests.test_reduce(reduce, WORLD_SIZE)
+    tests.test_all_reduce(all_reduce, WORLD_SIZE)
