@@ -332,17 +332,18 @@ def get_cifar() -> tuple[datasets.CIFAR10, datasets.CIFAR10]:
     return cifar_trainset, cifar_testset
 
 
-IMAGE_SIZE = 224
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD = [0.229, 0.224, 0.225]
+if MAIN:
+    IMAGE_SIZE = 224
+    IMAGENET_MEAN = [0.485, 0.456, 0.406]
+    IMAGENET_STD = [0.229, 0.224, 0.225]
 
-IMAGENET_TRANSFORM = transforms.Compose(
-    [
-        transforms.ToTensor(),
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-        transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-    ]
-)
+    IMAGENET_TRANSFORM = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        ]
+    )
 
 
 if MAIN:
