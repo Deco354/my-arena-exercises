@@ -696,16 +696,132 @@ def reduce(tensor, rank, world_size, dst=0, op: Literal["sum", "mean"] = "sum"):
     Reduces gradients to rank `dst`, so this process contains the sum or mean of all tensors across
     processes.
     """
-    raise NotImplementedError()
+    if rank == dst:
+        recv_buffer = t.zeros_like(tensor)
+        for other_rank in range(world_size):
+            if other_rank == dst:
+                continue
+            dist.recv(recv_buffer, src=other_rank)
+            tensor += recv_buffer
+    else:
+        dist.send(tensor, dst)
+
+    if op == "mean":
+        tensor /= world_size
+
+            
 
 
 def all_reduce(tensor, rank, world_size, op: Literal["sum", "mean"] = "sum"):
     """
     Allreduce the tensor across all ranks, using 0 as the initial gathering rank.
     """
-    raise NotImplementedError()
+    reduce(tensor, rank, world_size, dst=0, op=op)
+    broadcast(tensor, rank, world_size, src=0)
+    
 
 
 if MAIN:
     tests.test_reduce(reduce, WORLD_SIZE)
     tests.test_all_reduce(all_reduce, WORLD_SIZE)
+
+# %%
+class SimpleModel(t.nn.Module):
+    def __init__(self):
+        super(SimpleModel, self).__init__()
+        self.param = t.nn.Parameter(t.tensor([2.0]))
+
+    def forward(self, x: Tensor):
+        return x - self.param
+
+# %%
+
+def run_simple_model(rank, world_size):
+    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+
+    device = t.device(f"cuda:{rank}")
+    model = SimpleModel().to(device)  # Move the model to the device corresponding to this process
+    optimizer = t.optim.SGD(model.parameters(), lr=0.1)
+
+    input = t.tensor([rank], dtype=t.float32, device=device)
+    output = model(input)
+    loss = output.pow(2).sum()
+    loss.backward()  # Each rank has separate gradients at this point
+
+    print(f"Rank {rank}, before all_reduce, grads: {model.param.grad=}")
+    all_reduce(model.param.grad, rank, world_size)  # Synchronize gradients
+    print(
+        f"Rank {rank}, after all_reduce, synced grads (summed over processes): {model.param.grad=}"
+    )
+
+    optimizer.step()  # Step with the optimizer (this will update all models the same way)
+    print(f"Rank {rank}, new param: {model.param.data}")
+
+    dist.destroy_process_group()
+
+# %%
+
+if MAIN:
+    world_size = 2
+    mp.spawn(
+        run_simple_model,
+        args=(world_size,),
+        nprocs=world_size,
+        join=True,
+    )
+
+def get_untrained_resnet(n_classes: int) -> ResNet34:
+    """
+    Gets untrained resnet using code from part2_cnns.solutions (you can replace this with your
+    implementation).
+    """
+    resnet = ResNet34()
+    resnet.out_layers[-1] = Linear(resnet.out_features_per_group[-1], n_classes)
+    return resnet
+
+
+@dataclass
+class DistResNetTrainingArgs(WandbResNetFinetuningArgs):
+    world_size: int = 1
+    wandb_project: str | None = "day3-resnet-dist-training"
+
+
+class DistResNetTrainer:
+    args: DistResNetTrainingArgs
+
+    def __init__(self, args: DistResNetTrainingArgs, rank: int):
+        self.args = args
+        self.rank = rank
+        self.device = t.device(f"cuda:{rank}")
+
+    def pre_training_setup(self):
+        raise NotImplementedError()
+
+    def training_step(self, imgs: Tensor, labels: Tensor) -> Tensor:
+        raise NotImplementedError()
+
+    @t.inference_mode()
+    def evaluate(self) -> float:
+        raise NotImplementedError()
+
+    def train(self):
+        raise NotImplementedError()
+
+
+def dist_train_resnet_from_scratch(rank, world_size):
+    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    args = DistResNetTrainingArgs(world_size=world_size)
+    trainer = DistResNetTrainer(args, rank)
+    trainer.train()
+    dist.destroy_process_group()
+
+
+if MAIN:
+    world_size = t.cuda.device_count()
+    mp.spawn(
+        dist_train_resnet_from_scratch,
+        args=(world_size,),
+        nprocs=world_size,
+        join=True,
+    )
+# %%
