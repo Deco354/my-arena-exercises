@@ -792,21 +792,114 @@ class DistResNetTrainer:
 
     def __init__(self, args: DistResNetTrainingArgs, rank: int):
         self.args = args
+
+        # Set device and trainer
         self.rank = rank
         self.device = t.device(f"cuda:{rank}")
 
     def pre_training_setup(self):
-        raise NotImplementedError()
+        self.model = get_untrained_resnet(self.args.n_classes).to(self.device)
+
+        # Broadcast the same parameters to all processes
+        if self.args.world_size > 1:
+            for param in self.model.parameters():
+                dist.broadcast(param.data, src=0)
+
+        self.optimizer = AdamW(
+            self.model.out_layers[-1].parameters(),
+            lr=self.args.learning_rate,
+            weight_decay=self.args.weight_decay,
+        )
+        self.trainset, self.testset = get_cifar()
+
+        # Create a Distributed Sampler to divide the dataset up between processes
+        self.train_sampler = t.utils.data.DistributedSampler(
+            self.trainset,
+            num_replicas=args.world_size,
+            rank=self.rank,
+        )
+        self.train_loader = DataLoader(
+            self.trainset, 
+            batch_size=self.args.batch_size, 
+            sampler=self.train_sampler, 
+            num_workers=2, 
+            pin_memory=True, 
+            shuffle=True
+            )
+        
+        self.test_sampler = t.utils.data.DistributedSampler(
+            self.testset,
+            num_replicas=args.world_size,
+            rank=self.rank,
+        )
+        self.test_loader = DataLoader(self.testset, batch_size=self.args.batch_size, sampler=self.test_sampler, num_workers=2, pin_memory=True, shuffle=False)
+        self.logged_variables = {"loss": [], "accuracy": []}
+        self.examples_seen = 0
+            
+
 
     def training_step(self, imgs: Tensor, labels: Tensor) -> Tensor:
-        raise NotImplementedError()
+        imgs, labels = imgs.to(self.device), labels.to(self.device)
+
+        logits = self.model(imgs)
+        loss = F.cross_entropy(logits, labels)
+        loss.backward()
+
+        # Set all gradients as average of all gradients
+        if self.args.world_size > 1:
+            for param in self.model.parameters():
+                dist.all_reduce(tensor=param.grad, op=ReduceOp.MEAN)
+        
+
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+
+        self.examples_seen += imgs.shape[0]
+        self.logged_variables["loss"].append(loss.item())
+        return loss
+        
 
     @t.inference_mode()
     def evaluate(self) -> float:
-        raise NotImplementedError()
+        self.model.eval()
+        total_correct, total_samples = 0, 0
+
+        for imgs, labels in tqdm(self.test_loader, desc="Evaluating"):
+            imgs, labels = imgs.to(self.device), labels.to(self.device)
+            logits = self.model(imgs)
+            total_correct += (logits.argmax(dim=1) == labels).sum().item()
+            total_samples += len(imgs)
+
+        self.eval_counts = t.tensor([total_correct, total_samples])
+        dist.all_reduce(self.eval_counts, op=ReduceOp.SUM)
+        total_correct = self.eval_counts[0]
+        total_samples = self.eval_counts[1]
+        accuracy = total_correct / total_samples
+        self.logged_variables["accuracy"].append(accuracy)
+        return accuracy
 
     def train(self):
-        raise NotImplementedError()
+        self.pre_training_setup()
+        
+        accuracy = self.evaluate()
+
+        for epoch in range(self.args.epochs):
+            # We need to tell the sampler each time we start a new epoch so shuffling works across epochs and the same order isn't used
+            self.train_sampler.set_epoch(epoch)
+
+            self.model.train()
+
+            pbar = tqdm(self.train_loader, desc="Training")
+            for imgs, labels in pbar:
+                loss = self.training_step(imgs, labels)
+                pbar.set_postfix(loss=f"{loss:.3f}", ex_seen=f"{self.examples_seen:06}")
+
+            accuracy = self.evaluate()
+            pbar.set_postfix(
+                loss=f"{loss:.3f}", accuracy=f"{accuracy:.2f}", ex_seen=f"{self.examples_seen:06}"
+            )
+
+        return self.logged_variables
 
 
 def dist_train_resnet_from_scratch(rank, world_size):
@@ -823,6 +916,6 @@ if MAIN:
         dist_train_resnet_from_scratch,
         args=(world_size,),
         nprocs=world_size,
-        join=True,
+        join=True 
     )
 # %%
