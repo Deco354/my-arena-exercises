@@ -838,29 +838,49 @@ class DistResNetTrainer:
         self.test_loader = DataLoader(self.testset, batch_size=self.args.batch_size, sampler=self.test_sampler, num_workers=2, pin_memory=True)
         self.logged_variables = {"loss": [], "accuracy": []}
         self.examples_seen = 0
+
+        # Have one instance start wandb
+        if self.rank == 0:
+            wandb.init(
+                project=self.args.wandb_project,
+                name=self.args.wandb_name,
+                config=self.args,
+            )
             
 
 
     def training_step(self, imgs: Tensor, labels: Tensor) -> Tensor:
         imgs, labels = imgs.to(self.device), labels.to(self.device)
-
+        t_start = time.time()
         
         logits = self.model(imgs) # Forward pass 
         loss = F.cross_entropy(logits, labels) # Calculate loss
-        loss.backward() # Backward pass
+        # Track times to help debug issues
+        t_fwd = time.time()
+        
+        loss.backward()
+        t_bkwd = time.time()
 
-        # Set all gradients as average of all gradients
         if self.args.world_size > 1:
             for param in self.model.parameters():
                 dist.all_reduce(tensor=param.grad, op=dist.reduce_op.SUM)
                 param.grad /= self.args.world_size
-        
-        # Update weights
+        t_dist = time.time()
+
         self.optimizer.step()
         self.optimizer.zero_grad()
 
         self.examples_seen += imgs.shape[0]
-        self.logged_variables["loss"].append(loss.item())
+        if self.rank == 0:
+            wandb.log(
+                {
+                    "loss": loss.item(),
+                    "fwd_time": t_fwd - t_start,
+                    "back_time": t_bkwd - t_fwd,
+                    "dist_time": t_dist - t_bkwd
+                },
+                step=self.examples_seen
+            )
         return loss
         
 
@@ -869,7 +889,8 @@ class DistResNetTrainer:
         self.model.eval()
         total_correct, total_samples = 0, 0
 
-        for imgs, labels in tqdm(self.test_loader, desc="Evaluating"):
+        pbar = tqdm(self.test_loader, desc="Evaluating", disable=self.rank != 0)
+        for imgs, labels in pbar:
             imgs, labels = imgs.to(self.device), labels.to(self.device)
             logits = self.model(imgs)
             total_correct += (logits.argmax(dim=1) == labels).sum().item()
@@ -881,6 +902,9 @@ class DistResNetTrainer:
         total_samples = self.eval_counts[1]
         accuracy = total_correct / total_samples
         self.logged_variables["accuracy"].append(accuracy)
+        if self.rank == 0:
+            wandb.log({"accuracy": {accuracy}}, step=self.examples_seen)
+
         return accuracy
 
     def train(self):
@@ -889,21 +913,30 @@ class DistResNetTrainer:
         accuracy = self.evaluate()
 
         for epoch in range(self.args.epochs):
+            epoch_start_time = time.time()
             # We need to tell the sampler each time we start a new epoch so shuffling works across epochs and the same order isn't used
             self.train_sampler.set_epoch(epoch)
 
             self.model.train()
-
-            pbar = tqdm(self.train_loader, desc="Training")
+            # Disable progress bar for non rank 0 processes
+            pbar = tqdm(self.train_loader, desc="Training", disable=self.rank != 0)
             for imgs, labels in pbar:
                 loss = self.training_step(imgs, labels)
                 pbar.set_postfix(loss=f"{loss:.3f}", ex_seen=f"{self.examples_seen:06}")
 
             accuracy = self.evaluate()
-            pbar.set_postfix(
-                loss=f"{loss:.3f}", accuracy=f"{accuracy:.2f}", ex_seen=f"{self.examples_seen:06}"
-            )
 
+            # Keep all logging to one process, 
+            # Remember at the end of each step we're taking broadcasting the mean of all the processes gradients so they're all the same
+            if self.rank == 0:
+                pbar.set_postfix(
+                    loss=f"{loss:.3f}", accuracy=f"{accuracy:.2f}", ex_seen=f"{self.examples_seen:06}"
+                )
+                wandb.log({"epoch_duration": time.time() - epoch_start_time}, step=self.examples_seen)
+
+        if self.rank == 0:
+            wandb.finish()
+            t.save(self.model.state_dict(), f"resnet_{self.rank}.pth")
         return self.logged_variables
 
 
