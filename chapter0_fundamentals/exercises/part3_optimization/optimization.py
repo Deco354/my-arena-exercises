@@ -332,18 +332,18 @@ def get_cifar() -> tuple[datasets.CIFAR10, datasets.CIFAR10]:
     return cifar_trainset, cifar_testset
 
 
-if MAIN:
-    IMAGE_SIZE = 224
-    IMAGENET_MEAN = [0.485, 0.456, 0.406]
-    IMAGENET_STD = [0.229, 0.224, 0.225]
 
-    IMAGENET_TRANSFORM = transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-        ]
-    )
+IMAGE_SIZE = 224
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+
+IMAGENET_TRANSFORM = transforms.Compose(
+    [
+        transforms.ToTensor(),
+        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+    ]
+)
 
 
 if MAIN:
@@ -810,29 +810,32 @@ class DistResNetTrainer:
             lr=self.args.learning_rate,
             weight_decay=self.args.weight_decay,
         )
+        
         self.trainset, self.testset = get_cifar()
 
         # Create a Distributed Sampler to divide the dataset up between processes
-        self.train_sampler = t.utils.data.DistributedSampler(
-            self.trainset,
-            num_replicas=args.world_size,
-            rank=self.rank,
-        )
+        if self.args.world_size > 1:
+            self.train_sampler = t.utils.data.DistributedSampler(
+                self.trainset,
+                num_replicas=self.args.world_size,
+                rank=self.rank,
+            )
+            self.test_sampler = t.utils.data.DistributedSampler(
+                self.testset,
+                num_replicas=self.args.world_size,
+                rank=self.rank,
+            )
+        else: # Ensure code still works when not distributed
+            self.train_sampler, self.test_sampler = None
+
         self.train_loader = DataLoader(
             self.trainset, 
             batch_size=self.args.batch_size, 
             sampler=self.train_sampler, 
             num_workers=2, 
             pin_memory=True, 
-            shuffle=True
             )
-        
-        self.test_sampler = t.utils.data.DistributedSampler(
-            self.testset,
-            num_replicas=args.world_size,
-            rank=self.rank,
-        )
-        self.test_loader = DataLoader(self.testset, batch_size=self.args.batch_size, sampler=self.test_sampler, num_workers=2, pin_memory=True, shuffle=False)
+        self.test_loader = DataLoader(self.testset, batch_size=self.args.batch_size, sampler=self.test_sampler, num_workers=2, pin_memory=True)
         self.logged_variables = {"loss": [], "accuracy": []}
         self.examples_seen = 0
             
@@ -841,16 +844,18 @@ class DistResNetTrainer:
     def training_step(self, imgs: Tensor, labels: Tensor) -> Tensor:
         imgs, labels = imgs.to(self.device), labels.to(self.device)
 
-        logits = self.model(imgs)
-        loss = F.cross_entropy(logits, labels)
-        loss.backward()
+        
+        logits = self.model(imgs) # Forward pass 
+        loss = F.cross_entropy(logits, labels) # Calculate loss
+        loss.backward() # Backward pass
 
         # Set all gradients as average of all gradients
         if self.args.world_size > 1:
             for param in self.model.parameters():
-                dist.all_reduce(tensor=param.grad, op=ReduceOp.MEAN)
+                dist.all_reduce(tensor=param.grad, op=dist.reduce_op.SUM)
+                param.grad /= self.args.world_size
         
-
+        # Update weights
         self.optimizer.step()
         self.optimizer.zero_grad()
 
@@ -870,8 +875,8 @@ class DistResNetTrainer:
             total_correct += (logits.argmax(dim=1) == labels).sum().item()
             total_samples += len(imgs)
 
-        self.eval_counts = t.tensor([total_correct, total_samples])
-        dist.all_reduce(self.eval_counts, op=ReduceOp.SUM)
+        self.eval_counts = t.tensor([total_correct, total_samples], device=self.device)
+        dist.all_reduce(self.eval_counts, op=dist.ReduceOp.SUM)
         total_correct = self.eval_counts[0]
         total_samples = self.eval_counts[1]
         accuracy = total_correct / total_samples
@@ -916,6 +921,6 @@ if MAIN:
         dist_train_resnet_from_scratch,
         args=(world_size,),
         nprocs=world_size,
-        join=True 
+        join=True
     )
 # %%
